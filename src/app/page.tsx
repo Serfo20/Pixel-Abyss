@@ -1,7 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
-import { Button } from "@/components/ui/button";
+import { Button } from "../components/ui/button";
 import { useGame } from "@/store/game";
 import GameCanvas from "@/components/GameCanvas";
 
@@ -39,16 +38,6 @@ export default function GamePage() {
 
       {/* Mapa */}
       <GameCanvas onPos={handlePos} onEncounter={handleEncounter} />
-
-      {/* Acciones */}
-      <div className="flex gap-2">
-        <Button onClick={() => startRun()}>Nueva partida</Button>
-        <Link className="underline" href="/">Abrir editor</Link>
-      </div>
-
-      <p className="text-sm text-muted-foreground">
-        Muévete con WASD/Flechas. Entra en la misma celda del cuadrado rojo para iniciar un encuentro.
-      </p>
 
       {/* Modal de batalla */}
       {encounter && (

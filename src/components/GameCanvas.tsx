@@ -47,6 +47,9 @@ const TILE      = 40;
 
 type EncounterInfo = { kind: string; tx: number; ty: number };
 
+// extiendo Application para guardar cleanup sin any
+type AppWithCleanup = PIXI.Application & { _cleanup?: () => void };
+
 export default function GameCanvas({
   onPos,
   onEncounter,
@@ -55,9 +58,8 @@ export default function GameCanvas({
   onEncounter?: (info: EncounterInfo) => void;
 }) {
   const holderRef = useRef<HTMLDivElement | null>(null);
-  const appRef = useRef<PIXI.Application | null>(null);
+  const appRef = useRef<AppWithCleanup | null>(null);
 
-  // Refs para callbacks + estado: evitan re-montajes del efecto
   const onPosRef = useRef<((tx: number, ty: number) => void) | null>(null);
   onPosRef.current = onPos ?? null;
 
@@ -67,7 +69,7 @@ export default function GameCanvas({
   const wasCollidingRef = useRef(false);
 
   useEffect(() => {
-    let cancelled = false;
+    const cancelled = false;
 
     (async () => {
       if (appRef.current) {
@@ -76,7 +78,7 @@ export default function GameCanvas({
         appRef.current = null;
       }
 
-      const app = new PIXI.Application();
+      const app = new PIXI.Application() as AppWithCleanup;
       await app.init({ width: CANVAS_W, height: CANVAS_H, background: "#e6f0ff", antialias: false });
       if (cancelled) { try { app.destroy(true); } catch {} return; }
       appRef.current = app;
@@ -85,18 +87,15 @@ export default function GameCanvas({
       holder.innerHTML = "";
       holder.appendChild(app.canvas as HTMLCanvasElement);
 
-      // Parámetros visuales
       const tile = TILE;
       const playerSize = Math.floor(tile * 0.5);
       const enemySize  = Math.floor(tile * 0.5);
       const tilesX = Math.ceil(app.renderer.width  / tile) + 3;
       const tilesY = Math.ceil(app.renderer.height / tile) + 3;
 
-      // Estado
       const player = { tx: 0, ty: 0 };
       const enemy  = { tx: 5, ty: 3, kind: "slime" as const };
 
-      // Capas
       const layerWorld = new PIXI.Graphics();
       const layerGrid  = new PIXI.Graphics();
       const layerEnemy = new PIXI.Graphics();
@@ -112,7 +111,6 @@ export default function GameCanvas({
         const offX  = -mod((camX - app.renderer.width  / 2), tile);
         const offY  = -mod((camY - app.renderer.height / 2), tile);
 
-        // Fondo
         layerWorld.clear();
         for (let y = -1; y < tilesY; y++) {
           for (let x = -1; x < tilesX; x++) {
@@ -124,7 +122,6 @@ export default function GameCanvas({
           }
         }
 
-        // Grilla
         layerGrid.clear();
         const dash = 6, gap = 6;
         const drawDashed = (x1:number, y1:number, x2:number, y2:number) => {
@@ -145,13 +142,11 @@ export default function GameCanvas({
         for (let x = gridOX; x <= app.renderer.width; x += tile) drawDashed(x, 0, x, app.renderer.height);
         for (let y = gridOY; y <= app.renderer.height; y += tile) drawDashed(0, y, app.renderer.width, y);
 
-        // Enemigo
         layerEnemy.clear();
         const enemyScreenX = Math.floor(offX + (enemy.tx - baseX) * tile + (tile - enemySize) / 2);
         const enemyScreenY = Math.floor(offY + (enemy.ty - baseY) * tile + (tile - enemySize) / 2);
         layerEnemy.rect(enemyScreenX, enemyScreenY, enemySize, enemySize).fill({ color: 0xef4444 });
 
-        // Jugador
         layerActor.clear();
         const px = Math.floor(app.renderer.width  / 2 - playerSize / 2);
         const py = Math.floor(app.renderer.height / 2 - playerSize / 2);
@@ -170,7 +165,6 @@ export default function GameCanvas({
         }
       };
 
-      // Input
       const keys = new Set<string>();
       const onDown = (e: KeyboardEvent) => {
         const k = e.key.toLowerCase();
@@ -193,12 +187,10 @@ export default function GameCanvas({
       window.addEventListener("keydown", onDown);
       window.addEventListener("keyup", onUp);
 
-      // Primer render
       draw();
       onPosRef.current?.(player.tx, player.ty);
       tryEncounter();
 
-      // Cleanup
       const cleanup = () => {
         window.removeEventListener("keydown", onDown);
         window.removeEventListener("keyup", onUp);
@@ -206,12 +198,12 @@ export default function GameCanvas({
         try { app.destroy(true); } catch {}
         appRef.current = null;
       };
-      (app as any)._cleanup = cleanup;
+      app._cleanup = cleanup;
     })();
 
     return () => {
-      const app = appRef.current as any;
-      const cleanup = app?._cleanup as (() => void) | undefined;
+      const app = appRef.current;
+      const cleanup = app?._cleanup;
       cleanup?.();
     };
   }, []);
