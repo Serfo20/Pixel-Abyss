@@ -1,36 +1,138 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Pixel Abyss
 
-## Getting Started
+_Un RPG roguelike–TCG single‑player (expandible a coop) en un abismo infinito por capas, con creación de arte en pixel art curado por la comunidad._
 
-First, run the development server:
+> **Estado:** prototipo en desarrollo (MVP).
+
+---
+
+## ✨ Características (MVP actual)
+- **Mapa por tiles** con cámara centrada y grilla sutil (seed determinista).
+- **Encuentros** al colisionar con entidades → modal de batalla (placeholder con “Huir”).
+- **Editor de pixel art** en navegador: zoom, export PNG, cuentagotas, paletas DB16 y RGB332, pixelado desde imagen externa.
+- **Integración IA (opcional)**: endpoint `/api/prompt-image` via Replicate para generar imagen por prompt y cuantizar a paleta.
+- **Stack**: Next.js (App Router) + TypeScript + Tailwind v4 (CLI) + shadcn/ui + Zustand + PixiJS v8 + next-themes (dark/light).
+
+---
+
+## 📦 Requisitos
+- **Node.js** 20.x o 22.x
+- **pnpm** (recomendado) o npm/yarn
+- Cuenta y **API token de Replicate** (solo si usarás el prompt→imagen).
+
+---
+
+## 🚀 Inicio rápido
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+# 1) Clonar
+git clone https://github.com/Serfo20/Pixel-Abyss.git
+cd Pixel-Abyss
+
+# 2) Dependencias
+pnpm install
+# o: npm install
+
+# 3) Variables de entorno
+cp .env.example .env.local  # si existe .env.example
+
+# 4) Desarrollo
 pnpm dev
-# or
-bun dev
+# abre http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Variables de entorno (/.env.local)
+```bash
+# IA (opcional)
+REPLICATE_API_TOKEN=tu_token
+REPLICATE_MODEL=stability-ai/sdxl  # ejemplo; reemplázalo si usas otro
+# App
+NEXT_PUBLIC_SITE_URL=http://localhost:3000
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+> Si no defines `REPLICATE_API_TOKEN`, el editor funciona igual; solo se desactiva el flujo prompt→imagen.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+---
 
-## Learn More
+## 🧰 Scripts útiles
+```bash
+pnpm dev         # modo desarrollo
+pnpm build       # build de producción
+pnpm start       # sirve .next/ con Node
+pnpm lint        # ESLint
+pnpm typecheck   # verificación TypeScript
+pnpm format      # Prettier
+```
 
-To learn more about Next.js, take a look at the following resources:
+---
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 🗂️ Estructura (resumen)
+```
+/public          # assets estáticos
+/src
+  /app           # App Router (Next.js)
+  /components    # UI y piezas reutilizables (shadcn/ui)
+  /lib           # helpers (estado, utils, persistencia)
+  /game          # mapa, encuentros, biomas, PixiJS
+  /editor        # editor de pixel art
+  /styles        # Tailwind (v4 CLI)
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+---
 
-## Deploy on Vercel
+## 🕹️ Loop básico
+1. Exploras el grid (biomas/POIs).
+2. Disparas eventos/encuentros.
+3. Botín: píxeles, habilidades, canvases, cartas.
+4. Usas píxeles para pixelar arte y montar cartas/equipo.
+5. Votas y recibes/otorgas bonos por arte popular.
+6. Reintentas y avanzas más profundo (capas más duras, jefe por piso).
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+---
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## 🧩 Sistemas principales (resumen)
+- **Movimiento & mapa:** ruido determinista (seed) + landmarks raros.
+- **Encuentros:** trigger por colisión de celda → modal de batalla.
+- **TCG/Build:** habilidades “slotables” en canvases; arte popular otorga bonus con caps.
+- **Progresión:** muerte no definitiva (castiga botín); XP lenta; oficios abiertos.
+- **Moderación & licencias:** foco en pixel art original; reglas de contribución y atribución claras.
+
+---
+
+## 🛣️ Roadmap corto
+- **v0.1 (MVP encuentros/loot):** combate por turnos simple, POIs mínimos, inventario/loadout (3 slots + 1 pasivo), persistencia local (IndexedDB).
+- **v0.2 (TCG + biomas):** mano dinámica, efectos de estado, 3 biomas + jefe.
+- **v0.3 (UGC curado):** colas de arte, votos ponderados por reputación, decay y caps de bonus.
+
+### Tareas inmediatas
+- Encuentro jugable con outcome real (victoria/derrota → botín → back to map).
+- POIs: cofres/ruinas que otorgan habilidades/canvases.
+- Inventario MVP con costes en píxeles y vista de bonus.
+- Persistencia de run (seed, piso, pos, HP, loadout, botín).
+
+---
+
+## 🎨 Paletas / Créditos
+- **DB16** (DawnBringer 16) y **RGB332 (256)** para cuantización.
+- shadcn/ui, PixiJS, Zustand, TailwindCSS, Next.js — ¡gracias a sus autores!
+
+---
+
+## 🤝 Contribuir
+1. Crea una rama `feat/…` o `fix/…`.
+2. Usa `pnpm lint && pnpm typecheck` antes del PR.
+3. Incluye una nota corta de diseño si afecta balance/UX.
+
+> Issues sugeridas: _Encuentro jugable MVP_, _Inventario + loadout_, _Persistencia local_, _POIs mínimos_, _Audio stingers_.
+
+---
+
+## 📄 Licencia
+MIT © 2025 Serfo — Puedes cambiarla cuando quieras (por ejemplo, a AGPL si prefieres “copyleft”).
+
+---
+
+## 🆘 Troubleshooting
+- **No arranca el editor IA:** falta `REPLICATE_API_TOKEN` o el modelo no existe.
+- **Bajo rendimiento del mapa:** activa chunking / reduce entidades por viewport en `/src/game`.
+- **Estilos raros:** asegúrate de correr Tailwind v4 CLI (scripts del repo) y purga habilitada.

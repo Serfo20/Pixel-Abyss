@@ -5,7 +5,7 @@ import * as PIXI from "pixi.js";
 /** --- utilidades --- */
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const smooth = (t: number) => t * t * (3 - 2 * t);
-const mod = (n: number, m: number) => ((n % m) + m) % m; // resto siempre positivo
+const mod = (n: number, m: number) => ((n % m) + m) % m;
 
 function valueNoise(rx: number, ry: number, scale = 0.08, seed = 1337) {
   const rand = (x: number, y: number) => {
@@ -40,24 +40,36 @@ const biomeAt = (tx: number, ty: number): Biome => {
   return "snow";
 };
 
-// --- Tamaños “grandes”: cambia estos 3 números y el resto se adapta ---
+// Tamaños
 const CANVAS_W = 1080;
 const CANVAS_H = 720;
-const TILE     = 40;   // tamaño de celda en píxeles
+const TILE      = 40;
 
-export default function GameCanvas({ onPos }: { onPos?: (tx: number, ty: number) => void }) {
+type EncounterInfo = { kind: string; tx: number; ty: number };
+
+export default function GameCanvas({
+  onPos,
+  onEncounter,
+}: {
+  onPos?: (tx: number, ty: number) => void;
+  onEncounter?: (info: EncounterInfo) => void;
+}) {
   const holderRef = useRef<HTMLDivElement | null>(null);
   const appRef = useRef<PIXI.Application | null>(null);
 
-  // mantener onPos en un ref para no depender de su identidad (no reinicia el efecto)
+  // Refs para callbacks + estado: evitan re-montajes del efecto
   const onPosRef = useRef<((tx: number, ty: number) => void) | null>(null);
   onPosRef.current = onPos ?? null;
+
+  const onEncounterRef = useRef<((info: EncounterInfo) => void) | null>(null);
+  onEncounterRef.current = onEncounter ?? null;
+
+  const wasCollidingRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
-      // limpiar instancias previas en hot-reload
       if (appRef.current) {
         try { appRef.current.ticker?.stop(); } catch {}
         try { appRef.current.destroy(true); } catch {}
@@ -73,33 +85,34 @@ export default function GameCanvas({ onPos }: { onPos?: (tx: number, ty: number)
       holder.innerHTML = "";
       holder.appendChild(app.canvas as HTMLCanvasElement);
 
-      // --- parámetros visuales ---
-      const tile = TILE;                                // tamaño de cada celda
-      const playerSize = Math.floor(tile * 0.5);        // jugador más pequeño que la celda
-      const tilesX = Math.ceil(app.renderer.width  / tile) + 3; // colchón extra
+      // Parámetros visuales
+      const tile = TILE;
+      const playerSize = Math.floor(tile * 0.5);
+      const enemySize  = Math.floor(tile * 0.5);
+      const tilesX = Math.ceil(app.renderer.width  / tile) + 3;
       const tilesY = Math.ceil(app.renderer.height / tile) + 3;
 
-      // estado mínimo
-      const player = { tx: 0, ty: 0 };  // posición en tiles
+      // Estado
+      const player = { tx: 0, ty: 0 };
+      const enemy  = { tx: 5, ty: 3, kind: "slime" as const };
 
-      // capas
-      const layerWorld = new PIXI.Graphics(); // biomas
-      const layerGrid  = new PIXI.Graphics(); // grilla sutil
-      const layerActor = new PIXI.Graphics(); // jugador
-      app.stage.addChild(layerWorld, layerGrid, layerActor);
+      // Capas
+      const layerWorld = new PIXI.Graphics();
+      const layerGrid  = new PIXI.Graphics();
+      const layerEnemy = new PIXI.Graphics();
+      const layerActor = new PIXI.Graphics();
+      app.stage.addChild(layerWorld, layerGrid, layerEnemy, layerActor);
 
       const draw = () => {
-        // cámara centrada al centro de la celda del jugador
         const camX = player.tx * tile + tile / 2;
         const camY = player.ty * tile + tile / 2;
 
-        // tiles-base visibles y offset en píxeles, con módulo POSITIVO (evita “fila/columna cortada”)
         const baseX = Math.floor((camX - app.renderer.width  / 2) / tile);
         const baseY = Math.floor((camY - app.renderer.height / 2) / tile);
         const offX  = -mod((camX - app.renderer.width  / 2), tile);
         const offY  = -mod((camY - app.renderer.height / 2), tile);
 
-        // --- fondo/biomas: cubre todo el canvas con colchón ---
+        // Fondo
         layerWorld.clear();
         for (let y = -1; y < tilesY; y++) {
           for (let x = -1; x < tilesX; x++) {
@@ -111,10 +124,9 @@ export default function GameCanvas({ onPos }: { onPos?: (tx: number, ty: number)
           }
         }
 
-        // --- grilla sutil en TODO el rectángulo, con desplazamiento correcto ---
+        // Grilla
         layerGrid.clear();
         const dash = 6, gap = 6;
-
         const drawDashed = (x1:number, y1:number, x2:number, y2:number) => {
           const dx = x2 - x1, dy = y2 - y1;
           const len = Math.hypot(dx, dy);
@@ -123,35 +135,42 @@ export default function GameCanvas({ onPos }: { onPos?: (tx: number, ty: number)
           while (d < len) {
             const seg = Math.min(dash, len - d);
             const sx = x1 + ux * d, sy = y1 + uy * d;
-            layerGrid
-              .moveTo(sx, sy)
-              .lineTo(sx + ux * seg, sy + uy * seg)
+            layerGrid.moveTo(sx, sy).lineTo(sx + ux * seg, sy + uy * seg)
               .stroke({ color: 0x000000, alpha: 0.12, width: 1 });
             d += dash + gap;
           }
         };
-
-        // posiciones iniciales de líneas (modulo tile) para cubrir todo el canvas
         const gridOX = mod(offX, tile);
         const gridOY = mod(offY, tile);
+        for (let x = gridOX; x <= app.renderer.width; x += tile) drawDashed(x, 0, x, app.renderer.height);
+        for (let y = gridOY; y <= app.renderer.height; y += tile) drawDashed(0, y, app.renderer.width, y);
 
-        // verticales
-        for (let x = gridOX; x <= app.renderer.width; x += tile) {
-          drawDashed(x, 0, x, app.renderer.height);
-        }
-        // horizontales
-        for (let y = gridOY; y <= app.renderer.height; y += tile) {
-          drawDashed(0, y, app.renderer.width, y);
-        }
+        // Enemigo
+        layerEnemy.clear();
+        const enemyScreenX = Math.floor(offX + (enemy.tx - baseX) * tile + (tile - enemySize) / 2);
+        const enemyScreenY = Math.floor(offY + (enemy.ty - baseY) * tile + (tile - enemySize) / 2);
+        layerEnemy.rect(enemyScreenX, enemyScreenY, enemySize, enemySize).fill({ color: 0xef4444 });
 
-        // --- jugador: centrado dentro de SU celda en pantalla ---
+        // Jugador
         layerActor.clear();
         const px = Math.floor(app.renderer.width  / 2 - playerSize / 2);
         const py = Math.floor(app.renderer.height / 2 - playerSize / 2);
         layerActor.rect(px, py, playerSize, playerSize).fill({ color: 0x111827 });
       };
 
-      // input: moverse 1 celda por pulsación
+      const tryEncounter = () => {
+        const isColliding = player.tx === enemy.tx && player.ty === enemy.ty;
+        if (isColliding && !wasCollidingRef.current) {
+          wasCollidingRef.current = true;
+          const info = { kind: enemy.kind, tx: enemy.tx, ty: enemy.ty };
+          onEncounterRef.current?.(info);
+        }
+        if (!isColliding && wasCollidingRef.current) {
+          wasCollidingRef.current = false;
+        }
+      };
+
+      // Input
       const keys = new Set<string>();
       const onDown = (e: KeyboardEvent) => {
         const k = e.key.toLowerCase();
@@ -163,20 +182,23 @@ export default function GameCanvas({ onPos }: { onPos?: (tx: number, ty: number)
         if (k === "s" || k === "arrowdown")  { player.ty += 1; moved = true; }
         if (k === "a" || k === "arrowleft")  { player.tx -= 1; moved = true; }
         if (k === "d" || k === "arrowright") { player.tx += 1; moved = true; }
+
         if (moved) {
           draw();
           onPosRef.current?.(player.tx, player.ty);
+          tryEncounter();
         }
       };
       const onUp = (e: KeyboardEvent) => keys.delete(e.key.toLowerCase());
       window.addEventListener("keydown", onDown);
       window.addEventListener("keyup", onUp);
 
-      // primer render
+      // Primer render
       draw();
       onPosRef.current?.(player.tx, player.ty);
+      tryEncounter();
 
-      // cleanup seguro
+      // Cleanup
       const cleanup = () => {
         window.removeEventListener("keydown", onDown);
         window.removeEventListener("keyup", onUp);
@@ -192,17 +214,16 @@ export default function GameCanvas({ onPos }: { onPos?: (tx: number, ty: number)
       const cleanup = app?._cleanup as (() => void) | undefined;
       cleanup?.();
     };
-  }, []); // deps vacías: no reinicia Pixi
+  }, []);
 
   return (
     <div className="space-y-3">
-      {/* Centramos el canvas con mx-auto (sin tocar Pixi) */}
       <div
         ref={holderRef}
         className="rounded-xl border p-0 mx-auto"
         style={{ lineHeight: 0, width: CANVAS_W }}
       />
-      <p className="text-sm text-slate-700 text-center">
+      <p className="text-sm text-zinc-700 dark:text-zinc-300 text-center">
         Moverse: <b>WASD</b> / flechas. La grilla es referencia; el jugador (cuadrado negro) es más chico que cada celda.
       </p>
     </div>
