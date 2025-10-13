@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { Button } from "../components/ui/button";
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+import { Button } from "@/components/ui/button";
 import { useGame } from "@/store/game";
 import GameCanvas from "@/components/GameCanvas";
 
