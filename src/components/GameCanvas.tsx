@@ -1,3 +1,5 @@
+//GameGanvas.tsx
+
 "use client";
 import { useEffect, useRef } from "react";
 import * as PIXI from "pixi.js";
@@ -115,21 +117,19 @@ export default function GameCanvas({ onPos, onEncounter }: {
       // === enemigo PERSISTENTE ===
       const enemy = { ...loadEnemyPos(), kind: "slime" as const };
 
-      // si venimos de batalla, reposicionar y guardar
-      const shouldReposition = (() => {
-        try {
-          const qs = new URLSearchParams(window.location.search);
-          const viaQuery = qs.get("after") === "1";
-          const viaStore = sessionStorage.getItem("afterBattle") === "1";
-          return viaQuery || viaStore;
-        } catch { return false; }
-      })();
+      // Capas
+      const layerWorld = new PIXI.Graphics();
+      const layerGrid  = new PIXI.Graphics();
+      const layerEnemy = new PIXI.Graphics();
+      const layerActor = new PIXI.Graphics();
+      app.stage.addChild(layerWorld, layerGrid, layerEnemy, layerActor);
 
-      if (shouldReposition) {
+      // --- REPOSICIONAR ENEMIGO Y ESCUCHAR EVENTO 'afterbattle' ---
+
+      const repositionEnemy = () => {
         let nx = enemy.tx, ny = enemy.ty;
         let tries = 0;
         do {
-          // 3–6 tiles lejos en X/Y
           const dx = (Math.random() < 0.5 ? -1 : 1) * (3 + Math.floor(Math.random() * 4));
           const dy = (Math.random() < 0.5 ? -1 : 1) * (3 + Math.floor(Math.random() * 4));
           nx = player.tx + dx;
@@ -137,25 +137,35 @@ export default function GameCanvas({ onPos, onEncounter }: {
           tries++;
         } while ((nx === player.tx && ny === player.ty) && tries < 6);
 
-        enemy.tx = nx; enemy.ty = ny;
-        saveEnemyPos({ tx: enemy.tx, ty: enemy.ty }); // <-- GUARDAR
+        // debug
+        console.log("[afterbattle] repositioning enemy", {
+          from: { tx: enemy.tx, ty: enemy.ty },
+          to:   { tx: nx,       ty: ny       },
+          player,
+        });
 
-        try {
-          sessionStorage.removeItem("afterBattle");
-          const url = new URL(window.location.href);
-          url.searchParams.delete("after");
-          window.history.replaceState({}, "", url.toString());
-        } catch {}
+        enemy.tx = nx;
+        enemy.ty = ny;
+        try { sessionStorage.setItem("enemyPos", JSON.stringify({ tx: enemy.tx, ty: enemy.ty })); } catch {}
         wasCollidingRef.current = false;
-      }
-      // ===========================
+        draw(); // lo vemos inmediatamente movido
+      };
 
-      // Capas
-      const layerWorld = new PIXI.Graphics();
-      const layerGrid  = new PIXI.Graphics();
-      const layerEnemy = new PIXI.Graphics();
-      const layerActor = new PIXI.Graphics();
-      app.stage.addChild(layerWorld, layerGrid, layerEnemy, layerActor);
+      const onAfterBattle = () => {
+        try { sessionStorage.removeItem("afterBattle"); } catch {}
+        repositionEnemy();
+      };
+
+      // escucha el evento que dispara el modal al cerrar
+      window.addEventListener("afterbattle", onAfterBattle);
+
+      // si por cualquier motivo quedó el flag en sessionStorage, reubica ahora
+      try {
+        if (sessionStorage.getItem("afterBattle") === "1") {
+          onAfterBattle();
+        }
+      } catch {}
+
 
       const draw = () => {
         const camX = player.tx * tile + tile / 2;
@@ -256,6 +266,7 @@ export default function GameCanvas({ onPos, onEncounter }: {
       const cleanup = () => {
         window.removeEventListener("keydown", onDown);
         window.removeEventListener("keyup", onUp);
+        window.removeEventListener("afterbattle", onAfterBattle);
         try { app.ticker?.stop(); } catch {}
         try { app.destroy(true); } catch {}
         appRef.current = null;
