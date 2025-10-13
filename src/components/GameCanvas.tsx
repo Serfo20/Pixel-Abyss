@@ -2,7 +2,6 @@
 import { useEffect, useRef } from "react";
 import * as PIXI from "pixi.js";
 
-/** --- utilidades --- */
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const smooth = (t: number) => t * t * (3 - 2 * t);
 const mod = (n: number, m: number) => ((n % m) + m) % m;
@@ -46,14 +45,24 @@ const CANVAS_H = 720;
 const TILE      = 40;
 
 type EncounterInfo = { kind: string; tx: number; ty: number };
-
-// extiendo Application para guardar cleanup sin any
 type AppWithCleanup = PIXI.Application & { _cleanup?: () => void };
 
-export default function GameCanvas({
-  onPos,
-  onEncounter,
-}: {
+// helpers para persistir enemigo
+function loadEnemyPos(): { tx: number; ty: number } {
+  try {
+    const raw = sessionStorage.getItem("enemyPos");
+    if (raw) {
+      const p = JSON.parse(raw);
+      if (Number.isFinite(p?.tx) && Number.isFinite(p?.ty)) return { tx: p.tx, ty: p.ty };
+    }
+  } catch {}
+  return { tx: 5, ty: 3 };
+}
+function saveEnemyPos(pos: { tx: number; ty: number }) {
+  try { sessionStorage.setItem("enemyPos", JSON.stringify(pos)); } catch {}
+}
+
+export default function GameCanvas({ onPos, onEncounter }: {
   onPos?: (tx: number, ty: number) => void;
   onEncounter?: (info: EncounterInfo) => void;
 }) {
@@ -93,9 +102,55 @@ export default function GameCanvas({
       const tilesX = Math.ceil(app.renderer.width  / tile) + 3;
       const tilesY = Math.ceil(app.renderer.height / tile) + 3;
 
-      const player = { tx: 0, ty: 0 };
-      const enemy  = { tx: 5, ty: 3, kind: "slime" as const };
+      // cargar pos del jugador
+      let player = { tx: 0, ty: 0 };
+      try {
+        const saved = sessionStorage.getItem("playerPos");
+        if (saved) {
+          const pos = JSON.parse(saved);
+          if (Number.isFinite(pos?.tx) && Number.isFinite(pos?.ty)) player = { tx: pos.tx, ty: pos.ty };
+        }
+      } catch {}
 
+      // === enemigo PERSISTENTE ===
+      const enemy = { ...loadEnemyPos(), kind: "slime" as const };
+
+      // si venimos de batalla, reposicionar y guardar
+      const shouldReposition = (() => {
+        try {
+          const qs = new URLSearchParams(window.location.search);
+          const viaQuery = qs.get("after") === "1";
+          const viaStore = sessionStorage.getItem("afterBattle") === "1";
+          return viaQuery || viaStore;
+        } catch { return false; }
+      })();
+
+      if (shouldReposition) {
+        let nx = enemy.tx, ny = enemy.ty;
+        let tries = 0;
+        do {
+          // 3–6 tiles lejos en X/Y
+          const dx = (Math.random() < 0.5 ? -1 : 1) * (3 + Math.floor(Math.random() * 4));
+          const dy = (Math.random() < 0.5 ? -1 : 1) * (3 + Math.floor(Math.random() * 4));
+          nx = player.tx + dx;
+          ny = player.ty + dy;
+          tries++;
+        } while ((nx === player.tx && ny === player.ty) && tries < 6);
+
+        enemy.tx = nx; enemy.ty = ny;
+        saveEnemyPos({ tx: enemy.tx, ty: enemy.ty }); // <-- GUARDAR
+
+        try {
+          sessionStorage.removeItem("afterBattle");
+          const url = new URL(window.location.href);
+          url.searchParams.delete("after");
+          window.history.replaceState({}, "", url.toString());
+        } catch {}
+        wasCollidingRef.current = false;
+      }
+      // ===========================
+
+      // Capas
       const layerWorld = new PIXI.Graphics();
       const layerGrid  = new PIXI.Graphics();
       const layerEnemy = new PIXI.Graphics();
@@ -165,6 +220,11 @@ export default function GameCanvas({
         }
       };
 
+      const savePos = () => {
+        try { sessionStorage.setItem("playerPos", JSON.stringify(player)); } catch {}
+      };
+
+      // Input
       const keys = new Set<string>();
       const onDown = (e: KeyboardEvent) => {
         const k = e.key.toLowerCase();
@@ -179,6 +239,7 @@ export default function GameCanvas({
 
         if (moved) {
           draw();
+          savePos();
           onPosRef.current?.(player.tx, player.ty);
           tryEncounter();
         }
@@ -187,9 +248,10 @@ export default function GameCanvas({
       window.addEventListener("keydown", onDown);
       window.addEventListener("keyup", onUp);
 
+      // Primer render (no tryEncounter aquí)
       draw();
+      savePos();
       onPosRef.current?.(player.tx, player.ty);
-      tryEncounter();
 
       const cleanup = () => {
         window.removeEventListener("keydown", onDown);
