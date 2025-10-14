@@ -28,7 +28,8 @@ export default function GamePage() {
 
   const endBattleAndRepositionEnemy = useCallback(() => {
     try { sessionStorage.setItem("afterBattle", "1"); } catch {}
-    window.dispatchEvent(new CustomEvent("afterbattle")); // avisa al canvas
+    window.dispatchEvent(new CustomEvent("afterbattle", { detail: { mode: "adjacent" } }));
+    //window.dispatchEvent(new CustomEvent("afterbattle", { detail: { mode: "random" } }));
     setEncounter(null);
   }, []);
 

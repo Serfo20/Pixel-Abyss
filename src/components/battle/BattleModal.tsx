@@ -3,6 +3,8 @@
 "use client";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
+//sfx
+import { text_sfx } from "@/lib/sfx";
 
 export type BattleInfo = { kind: string; tx: number; ty: number };
 
@@ -88,6 +90,9 @@ export default function BattleModal({
       setIsTyping(false);
       return;
     }
+
+    text_sfx({ variant: 1, volume: 0.2 });
+
     if (phase === "intro") {
       setPhase("won1");
       startTyping(0);

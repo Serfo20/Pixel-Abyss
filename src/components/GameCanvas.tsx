@@ -125,46 +125,68 @@ export default function GameCanvas({ onPos, onEncounter }: {
       app.stage.addChild(layerWorld, layerGrid, layerEnemy, layerActor);
 
       // --- REPOSICIONAR ENEMIGO Y ESCUCHAR EVENTO 'afterbattle' ---
+      type RepositionMode = "random" | "adjacent";
 
-      const repositionEnemy = () => {
+      function repositionEnemy(mode: RepositionMode = "random") {
         let nx = enemy.tx, ny = enemy.ty;
-        let tries = 0;
-        do {
-          const dx = (Math.random() < 0.5 ? -1 : 1) * (3 + Math.floor(Math.random() * 4));
-          const dy = (Math.random() < 0.5 ? -1 : 1) * (3 + Math.floor(Math.random() * 4));
-          nx = player.tx + dx;
-          ny = player.ty + dy;
-          tries++;
-        } while ((nx === player.tx && ny === player.ty) && tries < 6);
+
+        if (mode === "adjacent") {
+          // 4 vecinos posibles (arriba, abajo, izquierda, derecha)
+          const candidates = [
+            { x: player.tx + 1, y: player.ty },
+            { x: player.tx - 1, y: player.ty },
+            { x: player.tx,     y: player.ty + 1 },
+            { x: player.tx,     y: player.ty - 1 },
+          ];
+          // barajar para que no siempre sea el mismo
+          for (let i = candidates.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+          }
+          // elegir el primero que no sea la celda del jugador (ya lo garantizan)
+          const pick = candidates[0]!;
+          nx = pick.x; ny = pick.y;
+        } else {
+          // modo "random" (original): 3–6 tiles lejos en X/Y
+          let tries = 0;
+          do {
+            const dx = (Math.random() < 0.5 ? -1 : 1) * (3 + Math.floor(Math.random() * 4));
+            const dy = (Math.random() < 0.5 ? -1 : 1) * (3 + Math.floor(Math.random() * 4));
+            nx = player.tx + dx;
+            ny = player.ty + dy;
+            tries++;
+          } while ((nx === player.tx && ny === player.ty) && tries < 6);
+        }
 
         // debug
-        console.log("[afterbattle] repositioning enemy", {
-          from: { tx: enemy.tx, ty: enemy.ty },
-          to:   { tx: nx,       ty: ny       },
-          player,
+        console.log("[afterbattle] reposition enemy", {
+          mode, from: { tx: enemy.tx, ty: enemy.ty }, to: { tx: nx, ty: ny }, player
         });
 
         enemy.tx = nx;
         enemy.ty = ny;
         try { sessionStorage.setItem("enemyPos", JSON.stringify({ tx: enemy.tx, ty: enemy.ty })); } catch {}
         wasCollidingRef.current = false;
-        draw(); // lo vemos inmediatamente movido
-      };
+        draw(); // ver movimiento inmediato
+      }
 
-      const onAfterBattle = () => {
+      const onAfterBattle = (ev?: Event) => {
         try { sessionStorage.removeItem("afterBattle"); } catch {}
-        repositionEnemy();
+        // leer modo desde el CustomEvent.detail, o fallback a "random"
+        const mode = (ev instanceof CustomEvent && ev.detail?.mode) as RepositionMode | undefined;
+        repositionEnemy(mode ?? "random");
       };
 
       // escucha el evento que dispara el modal al cerrar
-      window.addEventListener("afterbattle", onAfterBattle);
+      window.addEventListener("afterbattle", onAfterBattle as EventListener);
 
-      // si por cualquier motivo quedó el flag en sessionStorage, reubica ahora
+      // si quedó el flag en sessionStorage, reubica ahora (por defecto random)
       try {
         if (sessionStorage.getItem("afterBattle") === "1") {
           onAfterBattle();
         }
       } catch {}
+
 
 
       const draw = () => {
