@@ -120,3 +120,18 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Tamaño base que ya tenías */
+html {
+  font-size: clamp(18px, 1.2vw + 14px, 20px);
+}
+
+/* Un poquito más de altura de línea global */
+body {
+  line-height: 1.5;
+}
+
+/* Encabezados compactos pero sin apretarse */
+h1, h2, h3 {
+  line-height: 1.15;
+}

@@ -151,14 +151,14 @@ export default function BattleModal({
         </header>
 
         {/* ÚNICO panel: evita “doble caja” y mantiene altura fija */}
-        <div className="rounded-md border p-4 text-sm leading-6 min-h-[56px]">
+        <div className="rounded-md border p-4 text-sm leading-6">
           {phase === "intro" ? (
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between min-h-[40px] text-base md:text-lg">
               <span>HP enemigo</span>
               <span className="font-mono">1</span>
             </div>
           ) : (
-            <p className="whitespace-pre-wrap font-medium m-0">{shownText}</p>
+            <p className="whitespace-pre-wrap items-center font-medium m-0 min-h-[40px] text-base md:text-lg">{shownText}</p>
           )}
         </div>
 
