@@ -1,9 +1,9 @@
-//GameGanvas.tsx
-
+// src/components/GameCanvas.tsx
 "use client";
 import { useEffect, useRef } from "react";
 import * as PIXI from "pixi.js";
 
+// ---------------- util ruido/biomas (igual que antes) ----------------
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const smooth = (t: number) => t * t * (3 - 2 * t);
 const mod = (n: number, m: number) => ((n % m) + m) % m;
@@ -27,10 +27,6 @@ function valueNoise(rx: number, ry: number, scale = 0.08, seed = 1337) {
 }
 
 type Biome = "water" | "shore" | "prairie" | "forest" | "rock" | "snow";
-const colorOf: Record<Biome, number> = {
-  water: 0x8ecae6, shore: 0xade8f4, prairie: 0xa7d948,
-  forest: 0x70b652, rock: 0xb9b7a7, snow: 0xffffff
-};
 const biomeAt = (tx: number, ty: number): Biome => {
   const h = valueNoise(tx, ty, 0.08);
   const m = valueNoise(tx + 999, ty - 999, 0.12);
@@ -41,15 +37,16 @@ const biomeAt = (tx: number, ty: number): Biome => {
   return "snow";
 };
 
-// Tamaños
+// ---------------- tamaños canvas ----------------
 const CANVAS_W = 1080;
 const CANVAS_H = 720;
 const TILE      = 40;
 
+// ---------------- tipos app/enemigos ----------------
 type EncounterInfo = { kind: string; tx: number; ty: number };
 type AppWithCleanup = PIXI.Application & { _cleanup?: () => void };
 
-// helpers para persistir enemigo
+// ---------------- persistencia de enemigo ----------------
 function loadEnemyPos(): { tx: number; ty: number } {
   try {
     const raw = sessionStorage.getItem("enemyPos");
@@ -64,6 +61,33 @@ function saveEnemyPos(pos: { tx: number; ty: number }) {
   try { sessionStorage.setItem("enemyPos", JSON.stringify(pos)); } catch {}
 }
 
+// ---------------- NUEVO: texturas por bioma ----------------
+const TILE_PATHS: Record<Biome, string[]> = {
+  prairie: ["/tiles/meadow/1.png","/tiles/meadow/2.png","/tiles/meadow/3.png"],
+  forest:  ["/tiles/forest/1.png","/tiles/forest/2.png","/tiles/forest/3.png"],
+  rock:    ["/tiles/rock/1.png","/tiles/rock/2.png","/tiles/rock/3.png"],
+  shore:   ["/tiles/shore/1.png","/tiles/shore/2.png","/tiles/shore/3.png"],
+  snow:    ["/tiles/snow/1.png","/tiles/snow/2.png","/tiles/snow/3.png"],
+  water:   ["/tiles/water/1.png","/tiles/water/2.png","/tiles/water/3.png"],
+};
+
+// caché de Textures en GPU
+const TILE_TEX: Partial<Record<Biome, PIXI.Texture[]>> = {};
+
+// hash determinístico para escoger variante estable por (tx,ty)
+function hash2(x: number, y: number, seed = 1013904223) {
+  let n = x * 374761393 + y * 668265263 + seed;
+  n = (n ^ (n >>> 13)) * 1274126177;
+  n = (n ^ (n >>> 16)) >>> 0;
+  return n;
+}
+function textureFor(biome: Biome, tx: number, ty: number): PIXI.Texture {
+  const arr = TILE_TEX[biome]!;
+  const idx = hash2(tx, ty) % arr.length;
+  return arr[idx];
+}
+
+// =====================================================================
 export default function GameCanvas({ onPos, onEncounter }: {
   onPos?: (tx: number, ty: number) => void;
   onEncounter?: (info: EncounterInfo) => void;
@@ -80,31 +104,47 @@ export default function GameCanvas({ onPos, onEncounter }: {
   const wasCollidingRef = useRef(false);
 
   useEffect(() => {
-    const cancelled = false;
+    let cancelled = false;
 
     (async () => {
+      // destruye app previa si existe
       if (appRef.current) {
         try { appRef.current.ticker?.stop(); } catch {}
         try { appRef.current.destroy(true); } catch {}
         appRef.current = null;
       }
 
+      // crea PIXI app
       const app = new PIXI.Application() as AppWithCleanup;
-      await app.init({ width: CANVAS_W, height: CANVAS_H, background: "#e6f0ff", antialias: false });
-      if (cancelled) { try { app.destroy(true); } catch {} return; }
+      await app.init({
+        width: CANVAS_W,
+        height: CANVAS_H,
+        background: "#e6f0ff",
+        antialias: false,
+      });
+      if (cancelled) { try { app.destroy(true); } catch {}; return; }
       appRef.current = app;
 
+      // monta canvas
       const holder = holderRef.current!;
       holder.innerHTML = "";
       holder.appendChild(app.canvas as HTMLCanvasElement);
 
+      // --- NUEVO: precarga texturas ---
+      const allUrls = Object.values(TILE_PATHS).flat();
+      await PIXI.Assets.load(allUrls);
+      for (const [b, urls] of Object.entries(TILE_PATHS) as [Biome, string[]][]) {
+        TILE_TEX[b] = urls.map((u) => PIXI.Texture.from(u));
+      }
+
+      // medidas
       const tile = TILE;
       const playerSize = Math.floor(tile * 0.5);
       const enemySize  = Math.floor(tile * 0.5);
       const tilesX = Math.ceil(app.renderer.width  / tile) + 3;
       const tilesY = Math.ceil(app.renderer.height / tile) + 3;
 
-      // cargar pos del jugador
+      // cargar pos jugador
       let player = { tx: 0, ty: 0 };
       try {
         const saved = sessionStorage.getItem("playerPos");
@@ -114,40 +154,37 @@ export default function GameCanvas({ onPos, onEncounter }: {
         }
       } catch {}
 
-      // === enemigo PERSISTENTE ===
+      // enemigo persistente
       const enemy = { ...loadEnemyPos(), kind: "slime" as const };
 
-      // Capas
-      const layerWorld = new PIXI.Graphics();
+      // capas
+      const layerWorld = new PIXI.Container(); // sprites de tiles
       const layerGrid  = new PIXI.Graphics();
       const layerEnemy = new PIXI.Graphics();
       const layerActor = new PIXI.Graphics();
       app.stage.addChild(layerWorld, layerGrid, layerEnemy, layerActor);
 
-      // --- REPOSICIONAR ENEMIGO Y ESCUCHAR EVENTO 'afterbattle' ---
-      type RepositionMode = "random" | "adjacent";
+      // caché de sprites para tiles visibles
+      const spriteCache = new Map<string, PIXI.Sprite>(); // key "tx,ty"
 
+      // ------------ reposicionar enemigo tras batalla ------------
+      type RepositionMode = "random" | "adjacent";
       function repositionEnemy(mode: RepositionMode = "random") {
         let nx = enemy.tx, ny = enemy.ty;
 
         if (mode === "adjacent") {
-          // 4 vecinos posibles (arriba, abajo, izquierda, derecha)
           const candidates = [
             { x: player.tx + 1, y: player.ty },
             { x: player.tx - 1, y: player.ty },
             { x: player.tx,     y: player.ty + 1 },
             { x: player.tx,     y: player.ty - 1 },
           ];
-          // barajar para que no siempre sea el mismo
           for (let i = candidates.length - 1; i > 0; i--) {
             const j = Math.floor(Math.random() * (i + 1));
             [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
           }
-          // elegir el primero que no sea la celda del jugador (ya lo garantizan)
-          const pick = candidates[0]!;
-          nx = pick.x; ny = pick.y;
+          nx = candidates[0]!.x; ny = candidates[0]!.y;
         } else {
-          // modo "random" (original): 3–6 tiles lejos en X/Y
           let tries = 0;
           do {
             const dx = (Math.random() < 0.5 ? -1 : 1) * (3 + Math.floor(Math.random() * 4));
@@ -158,37 +195,22 @@ export default function GameCanvas({ onPos, onEncounter }: {
           } while ((nx === player.tx && ny === player.ty) && tries < 6);
         }
 
-        // debug
-        console.log("[afterbattle] reposition enemy", {
-          mode, from: { tx: enemy.tx, ty: enemy.ty }, to: { tx: nx, ty: ny }, player
-        });
-
-        enemy.tx = nx;
-        enemy.ty = ny;
-        try { sessionStorage.setItem("enemyPos", JSON.stringify({ tx: enemy.tx, ty: enemy.ty })); } catch {}
+        enemy.tx = nx; enemy.ty = ny;
+        saveEnemyPos({ tx: enemy.tx, ty: enemy.ty });
         wasCollidingRef.current = false;
-        draw(); // ver movimiento inmediato
+        draw();
       }
 
       const onAfterBattle = (ev?: Event) => {
         try { sessionStorage.removeItem("afterBattle"); } catch {}
-        // leer modo desde el CustomEvent.detail, o fallback a "random"
         const mode = (ev instanceof CustomEvent && ev.detail?.mode) as RepositionMode | undefined;
         repositionEnemy(mode ?? "random");
       };
 
-      // escucha el evento que dispara el modal al cerrar
       window.addEventListener("afterbattle", onAfterBattle as EventListener);
+      try { if (sessionStorage.getItem("afterBattle") === "1") onAfterBattle(); } catch {}
 
-      // si quedó el flag en sessionStorage, reubica ahora (por defecto random)
-      try {
-        if (sessionStorage.getItem("afterBattle") === "1") {
-          onAfterBattle();
-        }
-      } catch {}
-
-
-
+      // ------------------- draw -------------------
       const draw = () => {
         const camX = player.tx * tile + tile / 2;
         const camY = player.ty * tile + tile / 2;
@@ -198,17 +220,40 @@ export default function GameCanvas({ onPos, onEncounter }: {
         const offX  = -mod((camX - app.renderer.width  / 2), tile);
         const offY  = -mod((camY - app.renderer.height / 2), tile);
 
-        layerWorld.clear();
+        // --- tiles como sprites ---
+        const visible = new Set<string>();
         for (let y = -1; y < tilesY; y++) {
           for (let x = -1; x < tilesX; x++) {
             const tx = baseX + x, ty = baseY + y;
             const sx = Math.floor(offX + x * tile);
             const sy = Math.floor(offY + y * tile);
             const biome = biomeAt(tx, ty);
-            layerWorld.rect(sx, sy, tile, tile).fill({ color: colorOf[biome] });
+            const key = `${tx},${ty}`;
+            visible.add(key);
+
+            const tex = textureFor(biome, tx, ty);
+            let spr = spriteCache.get(key);
+            if (!spr) {
+              spr = new PIXI.Sprite({ texture: tex });
+              spr.width = tile; spr.height = tile;
+              spriteCache.set(key, spr);
+              layerWorld.addChild(spr);
+            } else if (spr.texture !== tex) {
+              spr.texture = tex;
+            }
+            spr.x = sx;
+            spr.y = sy;
+          }
+        }
+        // reciclar los que salieron de pantalla
+        for (const [key, spr] of spriteCache) {
+          if (!visible.has(key)) {
+            spr.parent?.removeChild(spr);
+            spriteCache.delete(key);
           }
         }
 
+        // --- grilla (igual que antes) ---
         layerGrid.clear();
         const dash = 6, gap = 6;
         const drawDashed = (x1:number, y1:number, x2:number, y2:number) => {
@@ -229,11 +274,13 @@ export default function GameCanvas({ onPos, onEncounter }: {
         for (let x = gridOX; x <= app.renderer.width; x += tile) drawDashed(x, 0, x, app.renderer.height);
         for (let y = gridOY; y <= app.renderer.height; y += tile) drawDashed(0, y, app.renderer.width, y);
 
+        // --- enemigo ---
         layerEnemy.clear();
         const enemyScreenX = Math.floor(offX + (enemy.tx - baseX) * tile + (tile - enemySize) / 2);
         const enemyScreenY = Math.floor(offY + (enemy.ty - baseY) * tile + (tile - enemySize) / 2);
         layerEnemy.rect(enemyScreenX, enemyScreenY, enemySize, enemySize).fill({ color: 0xef4444 });
 
+        // --- jugador ---
         layerActor.clear();
         const px = Math.floor(app.renderer.width  / 2 - playerSize / 2);
         const py = Math.floor(app.renderer.height / 2 - playerSize / 2);
@@ -256,7 +303,7 @@ export default function GameCanvas({ onPos, onEncounter }: {
         try { sessionStorage.setItem("playerPos", JSON.stringify(player)); } catch {}
       };
 
-      // Input
+      // input
       const keys = new Set<string>();
       const onDown = (e: KeyboardEvent) => {
         const k = e.key.toLowerCase();
@@ -280,15 +327,16 @@ export default function GameCanvas({ onPos, onEncounter }: {
       window.addEventListener("keydown", onDown);
       window.addEventListener("keyup", onUp);
 
-      // Primer render (no tryEncounter aquí)
+      // primer render
       draw();
       savePos();
       onPosRef.current?.(player.tx, player.ty);
 
+      // cleanup
       const cleanup = () => {
         window.removeEventListener("keydown", onDown);
         window.removeEventListener("keyup", onUp);
-        window.removeEventListener("afterbattle", onAfterBattle);
+        window.removeEventListener("afterbattle", onAfterBattle as EventListener);
         try { app.ticker?.stop(); } catch {}
         try { app.destroy(true); } catch {}
         appRef.current = null;
@@ -297,6 +345,7 @@ export default function GameCanvas({ onPos, onEncounter }: {
     })();
 
     return () => {
+      cancelled = true;
       const app = appRef.current;
       const cleanup = app?._cleanup;
       cleanup?.();
